@@ -19,7 +19,6 @@ https://github.com/nvidia-omniverse/ovrtx
 The following instructions will help you get the project up and running on your local machine for development. At the moment, the project only supports Windows. If there's enough interest, I'd be happy to port it to MacOS and Linux in the future.
 
 ## Prerequisites and Dependencies
-
 - C++ compiler with C++20 support (MSVC)
 - Qt 6.x
 - CMake 3.17 or higher
@@ -45,7 +44,6 @@ cmake --build . --config RelWithDebInfo --target install
 ```
 
 ## Loading Plugin
-
 ovrtxMayaPlugin includes a Maya module (.mod) file. Add the installation directory to your MAYA_MODULE_PATH:
 
 ```
@@ -59,7 +57,6 @@ ovrtxRender;
 ```
 
 ## Supported features
-
 The plugin currently supports:
 
 - Anonymous layer
@@ -72,7 +69,6 @@ The plugin currently supports:
 - AOVs (LdrColor, DiffuseAlbedo, Normal)
 
 ## Known Issues
-
 - ovrtx_install_runtime() copies several ovrtx directories next to ovrtxMayaPlugin.mll. Together, they take up several gigabytes of disk space, with the precompiled shader cache alone being about 1 GB. This is expected and not a packaging issue. Apparently, all these directories are required at runtime. The RTX renderer loads each of them during startup, and removing any one of them prevents the HydraEngine from being created. At the moment, none of these directories can be omitted without breaking the renderer.
 
 - In some rare cases, pressing Render multiple times can produce slightly different fully converged final images, even when the scene has not changed. This usually happens within the first 3 renders.
@@ -80,5 +76,4 @@ The plugin currently supports:
 - OVRTX render view doesn't properly respect Resolution Gate && Film Gate sizes
 
 ## License
-
 This project is licensed under the MIT License.
