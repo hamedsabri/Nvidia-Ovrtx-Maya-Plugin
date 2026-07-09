@@ -2,7 +2,8 @@
 
 This is a C++ Maya plugin that integrates the NVIDIA Omniverse RTX (OVRTX) renderer with MayaUSD, to allow rendering path-traced USD scenes directly within Maya.
 
-<img width="1602" height="1745" alt="New Project" src="https://github.com/user-attachments/assets/982706f0-c0b8-436b-9e41-d2493d2b7af1" />
+<img width="1305" height="1539" alt="New Project (1)" src="https://github.com/user-attachments/assets/45f38ee3-2bc2-4379-9527-7334f4a8f0fe" />
+
 
 
 OVRTX is a pre-release NVIDIA SDK that exposes the Omniverse RTX renderer through both C and Python APIs. This project is built primarily using the C API.
@@ -67,6 +68,10 @@ The plugin currently supports:
 - Single stage
 - Multiple stages
 - MaterialX and UsdPreviewSurface
+- Post effects: ( bloom, color grade, chromatic aberration, motion blur,
+  tonemap operator, and transparent-background compositing )
+- Depth of field 
+- AOVs (LdrColor, DiffuseAlbedo, Normal)
 
 ## Known Issues
 
