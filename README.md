@@ -52,7 +52,7 @@ ovrtxMayaPlugin includes a Maya module (.mod) file. Add the installation directo
 ```
 set MAYA_MODULE_PATH=%MAYA_MODULE_PATH%;<path_to_install_directory>
 ```
-Launch Maya, then run the following MEL commands to load the plugin and start the renderer:
+Launch Maya, then run the following MEL commands to load the plugin and show the render window:
 
 ```
 loadPlugin "ovrtxMayaPlugin";
