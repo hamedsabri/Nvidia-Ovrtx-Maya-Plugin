@@ -68,12 +68,14 @@ The plugin currently supports:
 - Depth of field 
 - AOVs (LdrColor, DiffuseAlbedo, Normal)
 
-## Known Issues
+## Known Issues / Limitations
 - ovrtx_install_runtime() copies several ovrtx directories next to ovrtxMayaPlugin.mll. Together, they take up several gigabytes of disk space, with the precompiled shader cache alone being about 1 GB. This is expected and not a packaging issue. Apparently, all these directories are required at runtime. The RTX renderer loads each of them during startup, and removing any one of them prevents the HydraEngine from being created. At the moment, none of these directories can be omitted without breaking the renderer.
 
 - In some rare cases, pressing Render multiple times can produce slightly different fully converged final images, even when the scene has not changed. This usually happens within the first 3 renders.
 
 - OVRTX render view doesn't properly respect Resolution Gate && Film Gate sizes
+
+- No support for Time-Sampled scenes
 
 ## License
 This project is licensed under the MIT License.
