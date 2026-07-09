@@ -1,0 +1,4 @@
++ MAYAVERSION:2025 ovrtxMayaPlugin 1.0 @INSTALL_PREFIX_NORMALIZED@
+plug-ins: plug-ins_2025
+PATH+:=plug-ins_2025
+PXR_USD_WINDOWS_DLL_PATH+:=plug-ins_2025

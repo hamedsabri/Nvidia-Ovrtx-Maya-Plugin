@@ -4,8 +4,6 @@ This is a C++ Maya plugin that integrates the NVIDIA Omniverse RTX (OVRTX) rende
 
 <img width="1305" height="1539" alt="New Project (1)" src="https://github.com/user-attachments/assets/45f38ee3-2bc2-4379-9527-7334f4a8f0fe" />
 
-
-
 OVRTX is a pre-release NVIDIA SDK that exposes the Omniverse RTX renderer through both C and Python APIs. This project is built primarily using the C API.
 
 The OVRTX documentation includes plenty of examples that makes getting started straightforward:
