@@ -2,3 +2,4 @@
 plug-ins: plug-ins_2025
 PATH+:=plug-ins_2025
 PXR_USD_WINDOWS_DLL_PATH+:=plug-ins_2025
+PXR_MTLX_STDLIB_SEARCH_PATHS+:=plug-ins_2025/library/materialx
