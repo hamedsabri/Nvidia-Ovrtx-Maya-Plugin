@@ -45,7 +45,7 @@ def create_scene():
 
     # DistantLight
     light = UsdLux.DistantLight.Define(stage, "/DistantLight")
-    light.CreateIntensityAttr(20.0)
+    light.CreateIntensityAttr(500.0)
     light_xform = UsdGeom.XformCommonAPI(light)
     light_xform.SetTranslate(Gf.Vec3d(0.0, 20.0, 0.0))
     light_xform.SetRotate(Gf.Vec3f(-45.0, 30.0, 0.0))
