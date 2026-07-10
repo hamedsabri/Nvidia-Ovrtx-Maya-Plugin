@@ -77,5 +77,9 @@ The plugin currently supports:
 
 - No support for Time-Sampled scenes
 
+## Tutorials
+
+[`Rendering a Simple Scene`](tutorials/simple-scene-render.md)
+
 ## License
 This project is licensed under the MIT License.
