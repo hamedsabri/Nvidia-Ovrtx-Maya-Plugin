@@ -2,6 +2,7 @@
 
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/range1f.h>
+#include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/sdf/primSpec.h>
@@ -10,7 +11,9 @@
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdLux/lightAPI.h>
 #include <pxr/usd/usdUtils/dependencies.h>
+#include <pxr/base/tf/envSetting.h>
 
+#include <QByteArray>
 #include <QDir>
 #include <QFile>
 #include <QStringList>
@@ -56,6 +59,30 @@ std::string matrixLiteral(const GfMatrix4d& m)
     }
     s += ")";
     return s;
+}
+
+TF_DEFINE_ENV_SETTING(
+    OVRTX_MAYA_DEBUG_USDA, false,
+    "Write temp layers as ASCII .usda instead of the default binary .usdc "
+    "(slower, useful for debugging).");
+
+bool debugAsciiLayers()
+{
+    static const bool enabled = [] {
+        const bool on = TfGetEnvSetting(OVRTX_MAYA_DEBUG_USDA);
+        if (on) {
+            TF_STATUS(
+                "OVRTX_MAYA_DEBUG_USDA set — writing temp layers as ASCII "
+                ".usda (slower than the default .usdc)");
+        }
+        return on;
+    }();
+    return enabled;
+}
+
+const char* tempLayerExtension()
+{
+    return debugAsciiLayers() ? ".usda" : ".usdc";
 }
 
 bool writeTextFile(const QString& path, const std::string& text)
@@ -121,7 +148,10 @@ QString serializeSingleLayer(const SdfLayerHandle& layer,
         return fail(QStringLiteral("null layer"));
     }
 
-    SdfLayerRefPtr copy = SdfLayer::CreateAnonymous(".usda");
+    const char* const ext = tempLayerExtension();
+    const SdfFileFormatConstPtr format = SdfFileFormat::FindByExtension(ext);
+    SdfLayerRefPtr copy = format ? SdfLayer::CreateAnonymous(ext, format)
+                                 : SdfLayer::CreateAnonymous(ext);
     if (!copy) {
         return fail(QStringLiteral("failed to create scratch layer"));
     }
@@ -139,7 +169,8 @@ QString serializeSingleLayer(const SdfLayerHandle& layer,
     });
 
     const QString path = QDir::tempPath()
-        + QStringLiteral("/ovrtxmaya_%1_%2.usda").arg(renderId).arg(index);
+        + QStringLiteral("/ovrtxmaya_%1_%2").arg(renderId).arg(index)
+        + QString::fromLatin1(ext);
     if (!copy->Export(path.toStdString())) {
         return fail(QStringLiteral("failed to write temp layer: %1").arg(path));
     }
