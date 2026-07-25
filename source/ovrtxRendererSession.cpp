@@ -4,6 +4,7 @@
 #include <QDebug>
 
 #include <ovrtx/ovrtx.h>
+#include <ovrtx/ovrtx_attributes.h>
 #include <ovrtx/ovrtx_types.h>
 
 #include <algorithm>
@@ -303,9 +304,7 @@ bool OvrtxRendererSession::openUsdFromString(const std::string& usdaContent)
     return waitOp(m_renderer, enqueue.op_index, &m_lastError);
 }
 
-bool OvrtxRendererSession::addUsdReferenceFromString(
-    const std::string& usdaContent,
-    const QString& prefixPath)
+bool OvrtxRendererSession::addUsdReferenceFromString(const std::string& usdaContent, const QString& prefixPath)
 {
     clearError();
 
@@ -340,6 +339,68 @@ bool OvrtxRendererSession::addUsdReferenceFromString(
         return false;
     }
     return true;
+}
+
+bool OvrtxRendererSession::addUsdReferenceFromFile(const QString& filePath, const QString& prefixPath)
+{
+    clearError();
+
+    if (filePath.isEmpty()) {
+        m_lastError = QStringLiteral("empty ovrtx USD reference file");
+        return false;
+    }
+    if (prefixPath.isEmpty()) {
+        m_lastError = QStringLiteral("empty ovrtx USD reference prefix");
+        return false;
+    }
+    if (!isReady() && !initialize()) {
+        return false;
+    }
+
+    // Local handle: in snapshot-per-render we reset the stage each frame and
+    // never remove individual references, so we don't retain it.
+    const QByteArray fileBytes   = filePath.toUtf8();
+    const QByteArray prefixBytes = prefixPath.toUtf8();
+    ovrtx_usd_handle_t handle = OVRTX_INVALID_HANDLE;
+    const ovrtx_enqueue_result_t enqueue = ovrtx_add_usd_reference_from_file(
+        m_renderer, toOvx(fileBytes), toOvx(prefixBytes), &handle);
+    if (enqueue.status != OVRTX_API_SUCCESS) {
+        m_lastError = QStringLiteral("ovrtx_add_usd_reference_from_file failed: %1")
+            .arg(lastOvrtxError());
+        return false;
+    }
+
+    return waitOp(m_renderer, enqueue.op_index, &m_lastError);
+}
+
+bool OvrtxRendererSession::setXform(const QString& primPath,
+                                    const double (&matrixRowMajor)[16])
+{
+    clearError();
+
+    if (primPath.isEmpty()) {
+        m_lastError = QStringLiteral("empty ovrtx xform prim path");
+        return false;
+    }
+    if (!isReady() && !initialize()) {
+        return false;
+    }
+
+    const QByteArray pathBytes = primPath.toUtf8();
+    const ovx_string_t path = toOvx(pathBytes);
+
+    ovrtx_xform_matrix44d_t xform {};
+    std::memcpy(xform.v, matrixRowMajor, sizeof(xform.v));
+
+    const ovrtx_enqueue_result_t enqueue =
+        ovrtx_set_xform_mat(m_renderer, &path, 1, &xform);
+    if (enqueue.status != OVRTX_API_SUCCESS) {
+        m_lastError = QStringLiteral("ovrtx_set_xform_mat failed: %1")
+            .arg(lastOvrtxError());
+        return false;
+    }
+
+    return waitOp(m_renderer, enqueue.op_index, &m_lastError);
 }
 
 bool OvrtxRendererSession::resetSimulation(double time)

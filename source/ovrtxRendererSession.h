@@ -99,6 +99,8 @@ public:
     bool openUsdFromFile(const QString& filePath);
     bool openUsdFromString(const std::string& usdaContent);
     bool addUsdReferenceFromString(const std::string& usdaContent, const QString& prefixPath);
+    bool addUsdReferenceFromFile(const QString& filePath, const QString& prefixPath);
+    bool setXform(const QString& primPath, const double (&matrixRowMajor)[16]);
     bool resetSimulation(double time);
     bool resetStage();
 

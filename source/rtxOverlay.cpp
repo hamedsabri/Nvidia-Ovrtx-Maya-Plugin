@@ -3,10 +3,13 @@
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/range1f.h>
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/sdf/primSpec.h>
+#include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdLux/lightAPI.h>
-#include <pxr/usd/usdUtils/flattenLayerStack.h>
+#include <pxr/usd/usdUtils/dependencies.h>
 
 #include <QDir>
 #include <QFile>
@@ -102,107 +105,140 @@ std::string_view tonemapOperator(Settings::Tonemap tm)
     return "acesApproximation";
 }
 
-QString exportStageWithDefaultPrim(const UsdStageRefPtr& stage,
-                                   int32_t id,
-                                   QString* error)
+// Writes a single layer's own opinions to a standalone .usda temp file that
+// ovrtx can load by path, and returns that path.
+QString serializeSingleLayer(const SdfLayerHandle& layer,
+                             int32_t renderId,
+                             int32_t index,
+                             QString* error)
 {
     auto fail = [&](QString msg) -> QString {
         if (error) *error = std::move(msg);
         return QString();
     };
 
-    std::string flat;
-    if (!stage->ExportToString(&flat, /*addSourceFileComment=*/false)
-        || flat.empty()) {
-        return fail(QStringLiteral("UsdStage::ExportToString() failed."));
+    if (!layer) {
+        return fail(QStringLiteral("null layer"));
     }
 
-    SdfLayerRefPtr layer = SdfLayer::CreateAnonymous(".usda");
-    if (!layer || !layer->ImportFromString(flat)) {
-        return fail(QStringLiteral("Failed to parse flattened stage."));
+    SdfLayerRefPtr copy = SdfLayer::CreateAnonymous(".usda");
+    if (!copy) {
+        return fail(QStringLiteral("failed to create scratch layer"));
     }
+    copy->TransferContent(layer);
+    copy->SetSubLayerPaths({});
 
-    // Referencing relies on a defaultPrim; fall back to the first root prim.
-    if (!layer->HasDefaultPrim()) {
-        for (const SdfPrimSpecHandle& root : layer->GetRootPrims()) {
-            if (root) {
-                layer->SetDefaultPrim(root->GetNameToken());
-                break;
-            }
+    // Rewrite every asset path (references, payloads, textures) to absolute so
+    // they still resolve after the file moves to %TEMP%.
+    UsdUtilsModifyAssetPaths(copy, [layer](const std::string& assetPath) -> std::string {
+        if (assetPath.empty()) {
+            return assetPath;
         }
-    }
-    const QString path = QDir::tempPath() + QStringLiteral("/ovrtxmaya_multi_%1.usda").arg(id);
-    if (!layer->Export(path.toStdString())) {
-        return fail(QStringLiteral("Failed to write temporary stage file."));
+        const std::string abs = SdfComputeAssetPathRelativeToLayer(layer, assetPath);
+        return abs.empty() ? assetPath : abs;
+    });
+
+    const QString path = QDir::tempPath()
+        + QStringLiteral("/ovrtxmaya_%1_%2.usda").arg(renderId).arg(index);
+    if (!copy->Export(path.toStdString())) {
+        return fail(QStringLiteral("failed to write temp layer: %1").arg(path));
     }
     return path;
 }
 
-// Anonymous, non-empty override layers plus the flattened session layer —
-// the unsaved edits that must be serialized on top of the base scene.
-std::vector<SdfLayerRefPtr> collectEditLayers(const UsdStageRefPtr& stage,
-                                              const SdfLayerHandle& root,
-                                              const SdfLayerHandle& sessionLayer)
+struct LayerStackFeed
 {
-    std::vector<SdfLayerRefPtr> layers;
+    std::vector<std::string> layerRefs;   
+    std::string              singleCleanRoot;
+    std::vector<QString>     tempFiles;
+    bool                     ok {false};
+    QString                  error;
+};
 
-    auto consider = [&](const SdfLayerRefPtr& layer) {
-        if (!layer || layer == root || layer == sessionLayer) {
-            return;
-        }
-        if (!layer->IsAnonymous() || layer->IsEmpty()) {
-            return;
-        }
-        if (std::ranges::find(layers, layer) == layers.end()) {
-            layers.push_back(layer);
-        }
+// Prepares the set of USD files that describe "stage", to hand to ovrtx for
+LayerStackFeed buildLayerStackFeed(const UsdStageRefPtr& stage, int32_t renderId)
+{
+    LayerStackFeed feed;
+    auto fail = [&](QString msg) -> LayerStackFeed {
+        feed.error = std::move(msg);
+        feed.ok = false;
+        return feed;
     };
 
-    for (const auto& weak : stage->GetUsedLayers(/*includeClipLayers=*/false)) {
-        consider(SdfLayerRefPtr(weak));
+    const SdfLayerHandle root = stage ? stage->GetRootLayer() : SdfLayerHandle();
+    if (!root) {
+        return fail(QStringLiteral("stage has no root layer"));
     }
 
-    if (sessionLayer && !sessionLayer->IsEmpty()) {
-        if (UsdStageRefPtr sessionStage =
-                UsdStage::Open(sessionLayer, UsdStage::LoadNone)) {
-            if (SdfLayerRefPtr flat = UsdUtilsFlattenLayerStack(sessionStage);
-                flat && !flat->IsEmpty()) {
-                layers.push_back(flat);
-            }
+    std::vector<SdfLayerHandle> kept;
+    for (const SdfLayerHandle& layer : stage->GetLayerStack(/*includeSessionLayers=*/true)) {
+        if (layer && !layer->IsEmpty()) {
+            kept.push_back(layer);
         }
     }
 
-    return layers;
+    auto cleanOnDisk = [](const SdfLayerHandle& l) {
+        return l && !l->IsAnonymous() && !l->IsDirty() && !l->GetRealPath().empty();
+    };
+
+    // If there are no unsaved/anonymous edits anywhere then hand ovrtx the on-disk root directly
+    const SdfLayerHandle session = stage->GetSessionLayer();
+    const bool sessionActive = session && !session->IsEmpty();
+    bool anyEdits = false;
+    bool anyDirtyOnDisk = false;
+    for (const SdfLayerHandle& l : kept) {
+        const bool anon = l->IsAnonymous();
+        const bool dirty = l->IsDirty();
+        anyEdits |= (anon || dirty);
+        anyDirtyOnDisk |= (!anon && dirty);
+    }
+    if (!anyEdits && !sessionActive && !root->GetRealPath().empty()) {
+        feed.singleCleanRoot = root->GetRealPath();
+        feed.ok = true;
+        return feed;
+    }
+
+    // Otherwise emit each layer strong->weak.
+    int32_t index = 0;
+    for (const SdfLayerHandle& layer : kept) {
+        const bool canRefByPath = cleanOnDisk(layer)
+            && !(anyDirtyOnDisk && !layer->GetSubLayerPaths().empty());
+        if (canRefByPath) {
+            feed.layerRefs.push_back(
+                usdAssetPath(QString::fromStdString(layer->GetRealPath())));
+            continue;
+        }
+        QString err;
+        const QString temp = serializeSingleLayer(layer, renderId, index++, &err);
+        if (temp.isEmpty()) {
+            return fail(err);
+        }
+        feed.tempFiles.push_back(temp);
+        feed.layerRefs.push_back(usdAssetPath(temp));
+    }
+
+    feed.ok = true;
+    return feed;
 }
 
-// The base scene reference: the on-disk identifier when the root is clean,
-// otherwise the whole stage exported to a temp file. Empty string on failure.
-std::string serializeBaseLayer(const UsdStageRefPtr& stage,
-                               const SdfLayerHandle& root,
-                               bool rootClean,
-                               int32_t renderId,
-                               QString* error)
+std::string buildSubLayerWrapper(const std::vector<std::string>& layerRefs)
 {
-    if (rootClean) {
-        return root->GetIdentifier();
+    std::string wrapper = "#usda 1.0\n(\n    subLayers = [\n";
+    for (const std::string& ref : layerRefs) {
+        wrapper += "        @";
+        wrapper += ref;
+        wrapper += "@,\n";
     }
+    wrapper += "    ]\n)\n";
+    return wrapper;
+}
 
-    std::string flat;
-    if (!stage->ExportToString(&flat, /*addSourceFileComment=*/false)
-        || flat.empty()) {
-        if (error) *error = QStringLiteral("UsdStage::ExportToString() failed.");
-        return {};
-    }
-
-    const QString basePath = QDir::tempPath()
-        + QStringLiteral("/ovrtxmaya_base_%1.usda").arg(renderId);
-    if (!writeTextFile(basePath, flat)) {
-        if (error) {
-            *error = QStringLiteral("Failed to write temporary RTX base stage.");
-        }
-        return {};
-    }
-    return basePath.toStdString();
+// Monotonic per-render id; keeps temp layer filenames unique so USD's layer
+// cache never serves a stale scene from a reused path.
+int32_t nextRenderId()
+{
+    static int32_t sRenderCounter {0};
+    return ++sRenderCounter;
 }
 
 bool openStageForRtx(OVRTXMAYA_NS::OvrtxRendererSession& renderer,
@@ -218,62 +254,30 @@ bool openStageForRtx(OVRTXMAYA_NS::OvrtxRendererSession& renderer,
         return fail(QStringLiteral("RTX render needs a loaded stage."));
     }
 
-    const SdfLayerHandle root         = stage->GetRootLayer();
-    const SdfLayerHandle sessionLayer = stage->GetSessionLayer();
-    const bool rootClean = root && !root->IsAnonymous()
-        && !root->GetIdentifier().empty() && !root->IsDirty();
-
-    // Unique per render so temp stage files never collide — a reused path would
-    // be served from USD's layer cache, re-rendering the previous scene.
-    static int sRenderCounter {0};
-    const int renderId = ++sRenderCounter;
-
-    const std::vector<SdfLayerRefPtr> editLayers =
-        collectEditLayers(stage, root, sessionLayer);
-
-    const std::string baseRef =
-        serializeBaseLayer(stage, root, rootClean, renderId, error);
-    if (baseRef.empty()) {
-        return false;
+    const LayerStackFeed feed = buildLayerStackFeed(stage, nextRenderId());
+    if (!feed.ok) {
+        return fail(feed.error);
     }
 
-    if (editLayers.empty()) {
-        if (!renderer.openUsdFromFile(QString::fromStdString(baseRef))) {
+    // Clean scene: hand ovrtx the on-disk root; it composes sublayers,
+    // references, variants and MaterialX itself — nothing serialized.
+    if (!feed.singleCleanRoot.empty()) {
+        if (!renderer.openUsdFromFile(QString::fromStdString(feed.singleCleanRoot))) {
             return fail(renderer.lastError());
         }
-        qInfo("[ovrtxMaya] RTX opened base: %s", baseRef.c_str());
+        qInfo("[ovrtxMaya] RTX opened on-disk root: %s", feed.singleCleanRoot.c_str());
         return true;
     }
 
-    QStringList editPaths;
-    for (size_t i = 0; i < editLayers.size(); ++i) {
-        const QString editPath = QDir::tempPath()
-            + QStringLiteral("/ovrtxmaya_edits_%1_%2.usda").arg(renderId).arg(i);
-        if (editLayers[i]->Export(editPath.toStdString())) {
-            editPaths << editPath;
-        }
-    }
-
-    // subLayers are strongest-first: edits override the base scene.
-    std::string wrapper = "#usda 1.0\n(\n    subLayers = [\n";
-    for (const QString& editPath : editPaths) {
-        wrapper += "        @";
-        wrapper += usdAssetPath(editPath);
-        wrapper += "@,\n";
-    }
-    wrapper += "        @";
-    wrapper += usdAssetPath(QString::fromStdString(baseRef));
-    wrapper += "@,\n    ]\n)\n";
-
-    // Fed to the renderer as a string; the file is only a debugging artifact.
-    writeTextFile(QDir::tempPath() + QStringLiteral("/ovrtxmaya_stage.usda"),
-                  wrapper);
-
+    // Edited scene: compose the local layer stack as a subLayers wrapper of
+    // on-disk paths + small per-layer serializations.
+    // TODO: for now serialized temp files are intentionally left on disk for debugging.
+    const std::string wrapper = buildSubLayerWrapper(feed.layerRefs);
     if (!renderer.openUsdFromString(wrapper)) {
         return fail(renderer.lastError());
     }
-    qInfo("[ovrtxMaya] RTX opened with %d edit layer(s) over %s",
-          int32_t(editPaths.size()), baseRef.c_str());
+    qInfo("[ovrtxMaya] RTX opened %d layer(s) (%d serialized)",
+          int32_t(feed.layerRefs.size()), int32_t(feed.tempFiles.size()));
     return true;
 }
 
@@ -404,6 +408,17 @@ std::string buildRtxOverlayUsda(const GfCamera& cam,
     return usda;
 }
 
+QString stageDefaultPrimName(const UsdStageRefPtr& stage)
+{
+    if (const UsdPrim dp = stage->GetDefaultPrim(); dp && dp.IsValid()) {
+        return QString::fromStdString(dp.GetName().GetString());
+    }
+    for (const UsdPrim& child : stage->GetPseudoRoot().GetChildren()) {
+        return QString::fromStdString(child.GetName().GetString());
+    }
+    return QString();
+}
+
 bool openStagesForRtx(OVRTXMAYA_NS::OvrtxRendererSession& renderer,
                       const std::vector<RtxStage>& stages,
                       QString* error)
@@ -430,33 +445,67 @@ bool openStagesForRtx(OVRTXMAYA_NS::OvrtxRendererSession& renderer,
     const GfMatrix4d baseWorldInv = stages[0].stageToWorld.GetInverse();
 
     for (size_t i = 1; i < stages.size(); ++i) {
-        QString       exportErr;
-        const QString file =
-            exportStageWithDefaultPrim(stages[i].stage, int(i), &exportErr);
-        if (file.isEmpty()) {
-            // Skip an un-exportable stage rather than failing the whole render.
-            qWarning("[ovrtxMaya] skipping stage %d: %s",
-                     int(i), exportErr.toUtf8().constData());
+        const int32_t renderId = nextRenderId();
+
+        LayerStackFeed feed = buildLayerStackFeed(stages[i].stage, renderId);
+        if (!feed.ok) {
+            qWarning("[ovrtxMaya] skipping stage %zu: %s",
+                     i, feed.error.toUtf8().constData());
             continue;
         }
 
-        const GfMatrix4d xform = stages[i].stageToWorld * baseWorldInv;
+        const QString defaultPrim = stageDefaultPrimName(stages[i].stage);
+        if (defaultPrim.isEmpty()) {
+            qWarning("[ovrtxMaya] skipping stage %zu: no root prim to reference", i);
+            continue;
+        }
 
-        std::string wrapper;
-        wrapper += "#usda 1.0\n(\n    defaultPrim = \"Root\"\n)\n\n";
-        wrapper += "def Xform \"Root\" (\n    references = @";
-        wrapper += usdAssetPath(file);
-        wrapper += "@\n)\n{\n";
-        line(wrapper, "    matrix4d xformOp:transform = {}", matrixLiteral(xform));
-        wrapper += "    uniform token[] xformOpOrder = [\"xformOp:transform\"]\n";
-        wrapper += "}\n";
+        // A referenceable file with an explicit defaultPrim
+        std::vector<std::string> refs = feed.layerRefs;
+        if (!feed.singleCleanRoot.empty()) {
+            refs.push_back(usdAssetPath(QString::fromStdString(feed.singleCleanRoot)));
+        }
+
+        std::string wrapper = "#usda 1.0\n(\n";
+        line(wrapper, "    defaultPrim = \"{}\"", defaultPrim.toStdString());
+        wrapper += "    subLayers = [\n";
+        for (const std::string& ref : refs) {
+            wrapper += "        @";
+            wrapper += ref;
+            wrapper += "@,\n";
+        }
+        wrapper += "    ]\n)\n";
+
+        const QString wrapperPath = QDir::tempPath()
+            + QStringLiteral("/ovrtxmaya_%1_stage.usda").arg(renderId);
+        if (!writeTextFile(wrapperPath, wrapper)) {
+            qWarning("[ovrtxMaya] skipping stage %zu: cannot write %s",
+                     i, wrapperPath.toUtf8().constData());
+            continue;
+        }
 
         const QString prefix = QStringLiteral("/OVRTX_MAYA_STAGE_%1").arg(i);
-        if (!renderer.addUsdReferenceFromString(wrapper, prefix)) {
-            return fail(renderer.lastError());
+        if (!renderer.addUsdReferenceFromFile(wrapperPath, prefix)) {
+            qWarning("[ovrtxMaya] skipping stage %zu: %s",
+                     i, renderer.lastError().toUtf8().constData());
+            continue;
         }
-        qInfo("[ovrtxMaya] composited stage %d at %s",
-              int(i), prefix.toUtf8().constData());
+
+        // Position the referenced subtree
+        const GfMatrix4d xform = stages[i].stageToWorld * baseWorldInv;
+        double m[16];
+        for (int32_t r = 0; r < 4; ++r) {
+            for (int32_t c = 0; c < 4; ++c) {
+                m[r * 4 + c] = xform[r][c];
+            }
+        }
+        if (!renderer.setXform(prefix, m)) {
+            qWarning("[ovrtxMaya] stage %zu placed at identity: %s",
+                     i, renderer.lastError().toUtf8().constData());
+        }
+
+        qInfo("[ovrtxMaya] composited stage %zu at %s",
+              i, prefix.toUtf8().constData());
     }
 
     return true;
