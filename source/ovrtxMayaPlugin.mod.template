@@ -1,5 +1,5 @@
-+ MAYAVERSION:2025 ovrtxMayaPlugin 1.0 @INSTALL_PREFIX_NORMALIZED@
-plug-ins: plug-ins_2025
-PATH+:=plug-ins_2025
-PXR_USD_WINDOWS_DLL_PATH+:=plug-ins_2025
-PXR_MTLX_STDLIB_SEARCH_PATHS+:=plug-ins_2025/library/materialx
++ MAYAVERSION:@MAYA_VERSION@ ovrtxMayaPlugin 1.0 @INSTALL_PREFIX_NORMALIZED@
+plug-ins: plug-ins_@MAYA_VERSION@
+PATH+:=plug-ins_@MAYA_VERSION@
+PXR_USD_WINDOWS_DLL_PATH+:=plug-ins_@MAYA_VERSION@
+PXR_MTLX_STDLIB_SEARCH_PATHS+:=plug-ins_@MAYA_VERSION@/library/materialx

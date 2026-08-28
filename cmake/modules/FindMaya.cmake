@@ -61,7 +61,7 @@ set(MAYA_VERSION "" CACHE STRING "Maya version to search for (e.g. 2024, 2025)")
 
 # Find include directory
 find_path(MAYA_INCLUDE_DIR
-    NAMES Maya/MFn.h  # Common header in all Maya versions
+    NAMES maya/MFn.h  # Common header in all Maya versions
     HINTS ${_MAYA_HINTS}
     PATH_SUFFIXES include devkit/include
 )
@@ -94,15 +94,15 @@ foreach(_lib ${_MAYA_CORE_LIBS})
 endforeach()
 
 # Version detection from header
-set(Maya_VERSION "UNKNOWN")
+set(MAYA_VERSION "UNKNOWN")
 if(MAYA_INCLUDE_DIR)
-    set(_mtypes_header "${MAYA_INCLUDE_DIR}/Maya/MTypes.h")
+    set(_mtypes_header "${MAYA_INCLUDE_DIR}/maya/MTypes.h")
     if(EXISTS "${_mtypes_header}")
         file(STRINGS "${_mtypes_header}" _version_line REGEX "^#define MAYA_API_VERSION")
         if(_version_line)
             string(REGEX REPLACE ".*MAYA_API_VERSION[ \t]+([0-9]+).*" "\\1" _api_version "${_version_line}")
-            string(SUBSTRING "${_api_version}" 0 4 Maya_VERSION_YEAR)
-            set(Maya_VERSION "${Maya_VERSION_YEAR}")
+            string(SUBSTRING "${_api_version}" 0 4 MAYA_VERSION_YEAR)
+            set(MAYA_VERSION "${MAYA_VERSION_YEAR}")
         endif()
     endif()
 endif()
@@ -110,7 +110,7 @@ endif()
 find_package_handle_standard_args(
     Maya
     REQUIRED_VARS MAYA_INCLUDE_DIR MAYA_LIBRARY_DIR MAYA_LIBRARIES
-    VERSION_VAR Maya_VERSION
+    VERSION_VAR MAYA_VERSION
 )
 
 if(NOT Maya_FOUND)
@@ -140,4 +140,4 @@ endforeach()
 # Status output
 message(STATUS "Maya include dir : ${MAYA_INCLUDE_DIR}")
 message(STATUS "Maya library dir : ${MAYA_LIBRARY_DIR}")
-message(STATUS "Maya version     : ${Maya_VERSION}")
+message(STATUS "Maya version     : ${MAYA_VERSION}")

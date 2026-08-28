@@ -45,8 +45,8 @@ else()
 endif()
 
 # MayaUSD
-find_package(MayaUsd REQUIRED)
-if(MayaUsd_FOUND)
+find_package(MayaUSD REQUIRED)
+if(MayaUSD_FOUND)
     message(STATUS "Using MayaUsd ${MayaUsd_VERSION}")
 endif()
 
@@ -59,7 +59,7 @@ endif()
 # Maya
 find_package(Maya REQUIRED)
 if(Maya_FOUND)
-    message(STATUS "Using Maya ${Maya_VERSION}")
+    message(STATUS "Using Maya ${MAYA_VERSION}")
 endif()
 
 # Qt

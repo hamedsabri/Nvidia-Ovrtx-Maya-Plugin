@@ -38,6 +38,7 @@ target_compile_definitions(${TARGET_NAME}
     PRIVATE 
         NOMINMAX
         TBB_SUPPRESS_DEPRECATED_MESSAGES
+        QT_NO_KEYWORDS
 )
 
 target_compile_features(${TARGET_NAME} 
@@ -52,33 +53,34 @@ ovrtx_setup_runtime(${TARGET_NAME})
 # -----------------------------------------------------------------------------
 set_target_properties(${TARGET_NAME} PROPERTIES SUFFIX ".mll")
 
-# -----------------------------------------------------------------------------
-# Maya module file — points the .mod at the installed plug-ins_<ver>/ dir.
-# -----------------------------------------------------------------------------
-set(INSTALL_PREFIX_NORMALIZED ${CMAKE_INSTALL_PREFIX})
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/ovrtxMayaPlugin.mod.template
-    ${CMAKE_CURRENT_BINARY_DIR}/ovrtxMayaPlugin.mod
-    @ONLY
-)
 
 # -----------------------------------------------------------------------------
 # Install
 # -----------------------------------------------------------------------------
 install(TARGETS ${TARGET_NAME}
-    RUNTIME DESTINATION plug-ins_${Maya_VERSION}
-    LIBRARY DESTINATION plug-ins_${Maya_VERSION}
-    ARCHIVE DESTINATION plug-ins_${Maya_VERSION}
+    RUNTIME DESTINATION plug-ins_${MAYA_VERSION}
+    LIBRARY DESTINATION plug-ins_${MAYA_VERSION}
+    ARCHIVE DESTINATION plug-ins_${MAYA_VERSION}
 )
 
-install(FILES $<TARGET_PDB_FILE:${TARGET_NAME}>
-    DESTINATION plug-ins_${Maya_VERSION}
-    OPTIONAL
-)
+if(WIN32)
+    install(FILES $<TARGET_PDB_FILE:${TARGET_NAME}>
+        DESTINATION plug-ins_${MAYA_VERSION}
+        OPTIONAL
+    )
+endif()
 
+# Maya module file 
+set(INSTALL_PREFIX_NORMALIZED ${CMAKE_INSTALL_PREFIX})
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/ovrtxMayaPlugin.mod.template
+    ${CMAKE_CURRENT_BINARY_DIR}/ovrtxMayaPlugin.mod
+    @ONLY
+)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ovrtxMayaPlugin.mod
     DESTINATION ${CMAKE_INSTALL_PREFIX}
 )
 
 # ovrtx
-ovrtx_install_runtime(${CMAKE_INSTALL_PREFIX}/plug-ins_${Maya_VERSION})
+ovrtx_install_runtime(${CMAKE_INSTALL_PREFIX}/plug-ins_${MAYA_VERSION})
